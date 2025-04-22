@@ -1,15 +1,11 @@
 # Facial-Recognition-System
 
-This project is a Python-based facial recognition system that allows users to register new faces and log in using facial recognition technology. It features a user-friendly interface built with tkinter, leverages OpenCV for webcam processing, and uses the face_recognition library for facial identification.
+A Python-based facial recognition system leveraging OpenCV's LBPHFaceRecognizer for real-time user authentication and registration. The system features an interactive tkinter GUI that allows users to register new facial profiles and log in seamlessly using their face. It includes automated logging of user activities with timestamped records, ensuring an efficient and secure workflow. This project is designed for ease of use and minimal dependencies, making it suitable for self projects and learning purposes.
 
-# Requirements
-Python 3.6 or above
+Key Features:
 
-Required Python Libraries:
-
-opencv-python
-face_recognition
-Pillow
-
-Install the dependencies by running:
-_pip install opencv-python face_recognition Pillow_
+Real-time face detection and recognition using OpenCV.
+User-friendly GUI for registration and login.
+Secure storage of facial data with model training.
+Automated activity logging with timestamps.
+No need for complex external dependencies like dlib or CMake.
