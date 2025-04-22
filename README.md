@@ -5,7 +5,11 @@ A Python-based facial recognition system leveraging OpenCV's LBPHFaceRecognizer 
 Key Features:
 
 Real-time face detection and recognition using OpenCV.
+
 User-friendly GUI for registration and login.
+
 Secure storage of facial data with model training.
+
 Automated activity logging with timestamps.
+
 No need for complex external dependencies like dlib or CMake.
