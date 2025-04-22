@@ -1,127 +1,209 @@
 import tkinter as tk
-import util
+from tkinter import messagebox, font
 import cv2
-from PIL import Image, ImageTk
 import os
-import subprocess
+import numpy as np
+from PIL import Image
+import threading
 import datetime
-import csv
 
+DATASET_DIR = "dataset"
+LOG_FILE = "log.txt"
+MODEL_FILE = "lbph_model.yml"
 
-class App:
-    def __init__(self):
-        self.main_window = tk.Tk()
-        self.main_window.geometry("1200x520+350+100")
+if not os.path.exists(DATASET_DIR):
+    os.makedirs(DATASET_DIR)
 
-        self.login_button_main_window = util.get_button(self.main_window, 'Login', 'green', self.login)
-        self.login_button_main_window.place(x=750, y=300)
+def log_action(action, name="Unknown"):
+    with open(LOG_FILE, "a") as f:
+        f.write(f"{datetime.datetime.now()} - {action}: {name}\n")
 
-        self.register_new_user_button_main_window = util.get_button(self.main_window, 'Register New  User', 'gray', self.register_new_user, fg='black')
-        self.register_new_user_button_main_window.place(x=750, y=400)
+class FacialAuthApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Intelligent Facial Authentication - LBPH")
+        self.root.geometry("450x300")
+        self.root.configure(bg="#2c3e50")
 
-        self.webcam_label = util.get_img_label(self.main_window)
-        self.webcam_label.place(x=10, y=0, width=700, height=500)
+        # Fonts
+        self.title_font = font.Font(family="Helvetica", size=18, weight="bold")
+        self.label_font = font.Font(family="Helvetica", size=12)
+        self.button_font = font.Font(family="Helvetica", size=12, weight="bold")
 
-        self.add_webcam(self.webcam_label)
+        # Title Label
+        self.title_label = tk.Label(root, text="Facial Authentication System", bg="#2c3e50", fg="white", font=self.title_font)
+        self.title_label.pack(pady=15)
 
-        self.db_dir = './database'
-        if not os.path.exists(self.db_dir):
-            os.mkdir(self.db_dir)
+        # Name Entry Label
+        self.name_label = tk.Label(root, text="Enter Name (for registration):", bg="#2c3e50", fg="white", font=self.label_font)
+        self.name_label.pack(pady=5)
 
-        self.log_path = './log.csv'
-        if not os.path.isfile(self.log_path):
-            with open(self.log_path, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Name", "Date", "Time", "Log Type"])
+        # Name Entry
+        self.entry_name = tk.Entry(root, font=self.label_font)
+        self.entry_name.pack(pady=5)
 
+        # Register Button
+        self.register_button = tk.Button(root, text="Register", command=self.start_register_thread, bg="#27ae60", fg="white", font=self.button_font, activebackground="#2ecc71", activeforeground="white")
+        self.register_button.pack(pady=10, ipadx=10, ipady=5)
 
-    def add_webcam(self, label):
-        if 'cap' not in self.__dict__:
-            self.cap = cv2.VideoCapture(0)
+        # Login Button
+        self.login_button = tk.Button(root, text="Login", command=self.start_login_thread, bg="#2980b9", fg="white", font=self.button_font, activebackground="#3498db", activeforeground="white")
+        self.login_button.pack(pady=10, ipadx=10, ipady=5)
 
-        self._label = label
-        self.process_webcam()
+        self.face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
 
-    def process_webcam(self):
-        ret, frame = self.cap.read()
-        self.most_recent_capture_arr = frame
+        if os.path.exists(MODEL_FILE):
+            self.recognizer.read(MODEL_FILE)
 
-        img_ = cv2.cvtColor(self.most_recent_capture_arr, cv2.COLOR_BGR2RGB)
-        self.most_recent_capture_pil = Image.fromarray(img_)
+    def start_register_thread(self):
+        thread = threading.Thread(target=self.register)
+        thread.daemon = True
+        thread.start()
 
-        imgtk = ImageTk.PhotoImage(image=self.most_recent_capture_pil)
-        self._label.imgtk = imgtk
-        self._label.configure(image=imgtk)
-        self._label.after(20, self.process_webcam)
+    def start_login_thread(self):
+        thread = threading.Thread(target=self.login_user)
+        thread.daemon = True
+        thread.start()
 
-    def login(self):
-        unknown_img_path = './.tmp.jpg'
-        cv2.imwrite(unknown_img_path, self.most_recent_capture_arr)
-        output = str(subprocess.check_output(['face_recognition', self.db_dir, unknown_img_path]))
-        name = output.split(',')[1][:-5]
-        if name in ['unknown_person', 'no_persons_found']:
-            util.msg_box('Oopss!','Unknown user. Register new user or Try Again!')
+    def register(self):
+        name = self.entry_name.get().strip()
+        if not name:
+            messagebox.showerror("Error", "Please enter a name.")
+            return
+
+        user_dir = os.path.join(DATASET_DIR, name)
+        if os.path.exists(user_dir):
+            messagebox.showerror("Error", "User already exists.")
+            return
+        os.makedirs(user_dir)
+
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            messagebox.showerror("Error", "Cannot open webcam. Please check your camera connection.")
+            return
+
+        count = 0
+        max_images = 30
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                messagebox.showerror("Error", "Failed to capture frame from webcam.")
+                break
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self.face_detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
+
+            for (x, y, w, h) in faces:
+                count += 1
+                face_img = gray[y:y+h, x:x+w]
+                img_path = os.path.join(user_dir, f"{count}.jpg")
+                cv2.imwrite(img_path, face_img)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                cv2.putText(frame, f"Images Captured: {count}/{max_images}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            cv2.imshow("Register - Press 'q' to quit", frame)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+            if count >= max_images:
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+        if count >= max_images:
+            self.train_model()
+            log_action("Registered", name)
+            messagebox.showinfo("Success", f"User '{name}' registered with {count} images.")
         else:
-            util.msg_box('Welcome Back', 'Welcome, {}'.format(name))
-            with open(self.log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                current_date = datetime.datetime.now().strftime('%d-%m-%Y')
-                current_time = datetime.datetime.now().strftime('%H:%M:%S')
-                writer.writerow([name, current_date, current_time, "Attendance Updated"])
-        os.remove(unknown_img_path)
+            messagebox.showerror("Error", "Registration incomplete. Not enough images captured.")
+            # Remove incomplete user data
+            for f in os.listdir(user_dir):
+                os.remove(os.path.join(user_dir, f))
+            os.rmdir(user_dir)
 
+    def train_model(self):
+        faces, labels = [], []
+        label_map = {}
+        current_label = 0
 
-    def register_new_user(self):
-        self.register_new_user_window = tk.Toplevel(self.main_window)
-        self.register_new_user_window.geometry("1200x520+370+120")
+        for user_name in os.listdir(DATASET_DIR):
+            user_path = os.path.join(DATASET_DIR, user_name)
+            if not os.path.isdir(user_path):
+                continue
+            label_map[current_label] = user_name
+            for image_name in os.listdir(user_path):
+                image_path = os.path.join(user_path, image_name)
+                img = Image.open(image_path).convert('L')  # grayscale
+                img_np = np.array(img, 'uint8')
+                faces.append(img_np)
+                labels.append(current_label)
+            current_label += 1
 
-        self.accept_button_register_new_window = util.get_button(self.register_new_user_window, 'Accept', 'green', self.accept_register_new_user)
-        self.accept_button_register_new_window.place(x=750, y=300)
+        if len(faces) == 0:
+            return
 
-        self.try_again_button_register_new_window = util.get_button(self.register_new_user_window, 'Try Again', 'red',
-                                                                 self.try_again_register_new_user)
-        self.try_again_button_register_new_window.place(x=750, y=400)
+        self.recognizer.train(faces, np.array(labels))
+        self.recognizer.save(MODEL_FILE)
+        self.label_map = label_map
 
-        self.capture_label = util.get_img_label(self.register_new_user_window)
-        self.capture_label.place(x=10, y=0, width=700, height=500)
+    def login_user(self):
+        if not hasattr(self, 'label_map'):
+            # Load label map from dataset folder
+            self.label_map = {}
+            current_label = 0
+            for user_name in os.listdir(DATASET_DIR):
+                user_path = os.path.join(DATASET_DIR, user_name)
+                if os.path.isdir(user_path):
+                    self.label_map[current_label] = user_name
+                    current_label += 1
+            if not self.label_map:
+                messagebox.showerror("Error", "No registered users found. Please register first.")
+                return
 
-        self.add_img_to_label(self.capture_label)
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            messagebox.showerror("Error", "Cannot open webcam. Please check your camera connection.")
+            return
 
-        self.entry_text_register_new_user = util.get_entry_text(self.register_new_user_window)
-        self.entry_text_register_new_user.place(x=750, y=150)
+        recognized_name = "Unknown"
+        confidence_threshold = 70  # Lower is more confident
+        recognized = False
+        max_frames = 100
+        frame_count = 0
 
-        self.text_label_register_new_user = util.get_text_label(self.register_new_user_window,"\ninput username: ")
-        self.text_label_register_new_user.place(x=750, y=70)
+        while frame_count < max_frames and not recognized:
+            ret, frame = cap.read()
+            if not ret:
+                messagebox.showerror("Error", "Failed to capture frame from webcam.")
+                break
 
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self.face_detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5)
 
-    def try_again_register_new_user(self):
-        self.register_new_user_window.destroy()
+            for (x, y, w, h) in faces:
+                face_img = gray[y:y+h, x:x+w]
+                label, confidence = self.recognizer.predict(face_img)
+                if confidence < confidence_threshold:
+                    recognized_name = self.label_map.get(label, "Unknown")
+                    recognized = True
+                    log_action("Login", recognized_name)
+                    break
 
-    def add_img_to_label(self, label):
-        imgtk = ImageTk.PhotoImage(image=self.most_recent_capture_pil)
-        label.imgtk = imgtk
-        label.configure(image=imgtk)
+            frame_count += 1
 
-        self.register_new_user_capture = self.most_recent_capture_arr.copy()
+        cap.release()
+        cv2.destroyAllWindows()
 
-    def start(self):
-        self.main_window.mainloop()
-
-    def accept_register_new_user(self):
-        name = self.entry_text_register_new_user.get(1.0, "end-1c")
-
-        cv2.imwrite(os.path.join(self.db_dir, '{}.jpg'.format(name)), self.register_new_user_capture)
-        with open(self.log_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            current_date = datetime.datetime.now().strftime('%d-%m-%Y')
-            current_time = datetime.datetime.now().strftime('%H:%M:%S')
-            writer.writerow([name , current_date, current_time, "Registered"])
-        util.msg_box('Success', "New User Registered")
-        self.register_new_user_window.destroy()
-
-
+        if recognized:
+            messagebox.showinfo("Success", f"Successfully logged in! Welcome, {recognized_name}")
+        else:
+            messagebox.showerror("Failed", "Face not recognized.")
 
 if __name__ == "__main__":
-    app = App()
-    app.start()
-
+    root = tk.Tk()
+    app = FacialAuthApp(root)
+    root.mainloop()
